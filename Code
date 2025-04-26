@@ -1,0 +1,148 @@
+!pip install pandas numpy scikit-learn scikit-image Pillow matplotlib google-colab
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from skimage.feature import hog
+from PIL import Image, ImageDraw, ImageFont
+import os
+from google.colab import drive
+import matplotlib.pyplot as plt
+
+# Function to load and preprocess images from Google Drive
+def load_images_from_drive(base_path):
+    try:
+        # List all folders (each folder corresponds to a roast level)
+        folder_names = os.listdir(base_path)
+        image_paths = []
+        labels = []
+
+        # Iterate over folders (each folder represents a roast level)
+        for folder in folder_names:
+            folder_path = os.path.join(base_path, folder)
+            if os.path.isdir(folder_path):  # Ensure it's a directory
+                image_files = os.listdir(folder_path)
+                for image_file in image_files:
+                    image_path = os.path.join(folder_path, image_file)
+                    if image_path.endswith(('.jpg', '.jpeg', '.png')):  # Only process image files
+                        image_paths.append(image_path)
+                        labels.append(folder)  # Folder name corresponds to roast level
+
+        if not image_paths:
+            print("Error: No valid images found in the specified folder structure.")
+            return None
+
+        return image_paths, labels
+
+    except Exception as e:
+        print(f"Error loading images: {e}")
+        return None
+
+# Function to extract image features using HOG
+def extract_image_features(image_path):
+    try:
+        image = Image.open(image_path).convert('L')  # Convert to grayscale
+        image = image.resize((128, 128))  # Resize to a consistent size
+        features, _ = hog(
+            np.array(image), 
+            pixels_per_cell=(8, 8), 
+            cells_per_block=(2, 2), 
+            visualize=True
+        )
+        return features
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
+
+# Function to add roast level text on the image and display it
+def add_text_to_image(image, text):
+    try:
+        # Add text to the image
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default()  # Default font, you can change this to a specific font if needed
+
+        # Position to add the text
+        text_position = (10, 10)
+        text_color = (255, 0, 0)  # Red color for the text
+
+        # Add text to the image
+        draw.text(text_position, text, font=font, fill=text_color)
+
+        # Display the image without saving it
+        plt.imshow(image)
+        plt.axis('off')  # Hide axes
+        plt.show()
+
+    except Exception as e:
+        print(f"Error adding text to image: {e}")
+
+# Main function to train the model and classify a test image
+def main():
+    # Mount Google Drive
+    drive.mount('/content/drive')
+    
+    # Set the path to the 'Images' folder in Google Drive
+    base_path = '/content/drive/MyDrive/Images'  # Adjust this path if necessary
+
+    # Step 1: Load and preprocess images
+    image_paths, labels = load_images_from_drive(base_path)
+    if image_paths is None or not image_paths:
+        return  # Exit if there's an issue with loading images
+
+    # Step 2: Extract features for training
+    feature_list = []
+    for image_path in image_paths:
+        features = extract_image_features(image_path)
+        if features is not None:
+            feature_list.append(features)
+
+    if not feature_list:
+        print("Error: No features extracted from images.")
+        return
+
+    # Convert to NumPy arrays
+    X = np.array(feature_list)
+    y = np.array(labels)
+
+    # Normalize features
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+
+    # Train-test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Step 3: Train the model
+    model = RandomForestClassifier(random_state=42, n_estimators=100)
+    model.fit(X_train, y_train)
+
+    # Step 4: Upload and classify a new test image
+    print("\nPlease upload an image for classification:")
+    from google.colab import files
+    uploaded = files.upload()
+
+    if uploaded:
+        # Get the uploaded file's name and open the image directly
+        test_image_path = list(uploaded.keys())[0]  # Get the uploaded file's name
+        
+        # Open the uploaded image
+        image = Image.open(test_image_path)
+        
+        # Extract features from the uploaded image
+        test_features = extract_image_features(test_image_path)
+        if test_features is None:
+            return  # Exit if there's an error with the test image
+
+        # Normalize and classify the test image
+        test_features = scaler.transform([test_features])
+        prediction = model.predict(test_features)
+        print(f"\nPredicted Roast Level for Uploaded Test Image: {prediction[0]}")
+
+        # Add roast level text to the image and display it
+        roast_level_text = f"Roast Level: {prediction[0]}"
+        add_text_to_image(image, roast_level_text)
+
+# Run the script
+if __name__ == "__main__":
+    main()
